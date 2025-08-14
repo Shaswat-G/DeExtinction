@@ -57,7 +57,9 @@ def build_tidy_tables(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """Build tidy posts and comments tables."""
     posts = df[df["type"] == "post"].copy()
     comments = df[df["type"] == "comment"].copy()
-    posts["content"] = (posts["title"].fillna("") + "\n\n" + posts["selftext"].fillna("")).str.strip()
+    posts["content"] = (
+        posts["title"].fillna("") + "\n\n" + posts["selftext"].fillna("")
+    ).str.strip()
     comments["content"] = comments["body"].fillna("").str.strip()
     posts["word_count"] = posts["content"].str.split().apply(len)
     comments["word_count"] = comments["content"].str.split().apply(len)
@@ -166,7 +168,9 @@ def save_outputs(
     os.makedirs(output_dir, exist_ok=True)
     posts_out = os.path.join(output_dir, "colossal_reddit_clean_posts.csv")
     comments_out = os.path.join(output_dir, "colossal_reddit_clean_comments.csv")
-    comments_joined_out = os.path.join(output_dir, "colossal_reddit_comments_joined.csv")
+    comments_joined_out = os.path.join(
+        output_dir, "colossal_reddit_comments_joined.csv"
+    )
     long_out = os.path.join(output_dir, "colossal_reddit_long.csv")
     posts_tidy.to_csv(posts_out, index=False, encoding="utf-8")
     comments_tidy.to_csv(comments_out, index=False, encoding="utf-8")
@@ -223,23 +227,35 @@ def build_long_form(
     return long_df
 
 
-def display_tables(
-    sub_counts: pd.DataFrame, top_posts: pd.DataFrame, comments_joined: pd.DataFrame
-):
-    """Display helpful tables to the user (if in notebook environment)."""
-    try:
-        from caas_jupyter_tools import display_dataframe_to_user
+def save_analysis_to_excel(
+    sub_counts: pd.DataFrame,
+    top_posts: pd.DataFrame,
+    comments_joined: pd.DataFrame,
+    posts_tidy: pd.DataFrame,
+    comments_tidy: pd.DataFrame,
+    long_df: pd.DataFrame,
+    daily_counts: pd.DataFrame,
+    output_dir: str,
+) -> str:
+    """Save all analysis tables to a single Excel workbook with each table on a different sheet."""
+    os.makedirs(output_dir, exist_ok=True)
+    excel_path = os.path.join(output_dir, "colossal_reddit_analysis.xlsx")
+    def make_tz_naive(df: pd.DataFrame) -> pd.DataFrame:
+        for col in df.columns:
+            if pd.api.types.is_datetime64tz_dtype(df[col]):
+                df[col] = df[col].dt.tz_localize(None)
+        return df
 
-        display_dataframe_to_user(
-            "Reddit — Top subreddits by activity", sub_counts.head(20)
-        )
-        display_dataframe_to_user("Reddit — Top 10 posts by engagement", top_posts)
-        display_dataframe_to_user(
-            "Reddit — Comments joined to parent post metadata (sample)",
-            comments_joined.head(20),
-        )
-    except ImportError:
-        logging.info("caas_jupyter_tools not available; skipping display.")
+    with pd.ExcelWriter(excel_path, engine="openpyxl") as writer:
+        make_tz_naive(sub_counts).to_excel(writer, sheet_name="Top Subreddits", index=False)
+        make_tz_naive(top_posts).to_excel(writer, sheet_name="Top Posts", index=False)
+        make_tz_naive(comments_joined.head(1000)).to_excel(writer, sheet_name="Comments+Posts", index=False)
+        make_tz_naive(posts_tidy).to_excel(writer, sheet_name="Posts Tidy", index=False)
+        make_tz_naive(comments_tidy).to_excel(writer, sheet_name="Comments Tidy", index=False)
+        make_tz_naive(long_df).to_excel(writer, sheet_name="Long Form", index=False)
+        make_tz_naive(daily_counts).to_excel(writer, sheet_name="Daily Activity", index=False)
+    logging.info(f"Saved all analysis tables to {excel_path}")
+    return excel_path
 
 
 def summarize(
@@ -290,7 +306,17 @@ def main(input_path: str, output_dir: str) -> Dict[str, Any]:
         posts_tidy, comments_tidy, comments_joined, long_df, output_dir
     )
     outputs["daily_activity_plot"] = plot_path
-    display_tables(sub_counts, top_posts, comments_joined)
+    excel_path = save_analysis_to_excel(
+        sub_counts,
+        top_posts,
+        comments_joined,
+        posts_tidy,
+        comments_tidy,
+        long_df,
+        daily_counts,
+        output_dir,
+    )
+    outputs["excel_analysis"] = excel_path
     summary = summarize(df, posts_tidy, comments_tidy, outputs)
     logging.info(f"Summary: {summary}")
     return summary
