@@ -1,2 +1,2 @@
 # DeExtinction
-Data Mining Scripts for SeExtinction Companies
+Data Mining Scripts for DeExtinction Companies
