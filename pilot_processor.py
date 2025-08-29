@@ -145,7 +145,7 @@ def plot_daily_activity(daily_counts: pd.DataFrame, output_dir: str) -> str:
         plt.figure()
         plt.plot(daily_counts["date_ch"], daily_counts["items_per_day"])
         plt.title("Daily Activity (items per day)")
-        plt.xlabel("Date (Europe/Zurich)")
+        plt.xlabel("Date (Europe/Zurich)") 
         plt.ylabel("Posts + Comments")
         plt.xticks(rotation=45)
         plt.tight_layout()
