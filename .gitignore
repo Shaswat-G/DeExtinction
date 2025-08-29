@@ -209,8 +209,5 @@ __marimo__/
 wolf.png
 *.csv
 *.parquet
-\data
-\output
-\reports
-
+\reddit_data
 environment.env
