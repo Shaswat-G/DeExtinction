@@ -2,6 +2,7 @@ import os, sys
 from dotenv import load_dotenv
 import pandas as pd
 import praw
+from praw.models.reddit.redditor import Redditor
 
 load_dotenv("environment.env")
 CLIENT_ID = os.getenv("REDDIT_CLIENT_ID")
@@ -19,7 +20,7 @@ reddit = praw.Reddit(
 
 print("Read-only? ", reddit.read_only)  # should be True
 
-u = reddit.redditor("ColossalBiosciences")
+u: Redditor = reddit.redditor("ColossalBiosciences")
 
 def gen_posts(user):
     # Auto-paginates under the hood, subject to rate limits.
