@@ -6,11 +6,12 @@
 3. [Core Classes and Functions](#core-classes-and-functions)
 4. [Data Collection Process](#data-collection-process)
 5. [Diff Analysis Methodology](#diff-analysis-methodology)
-6. [Output Files and Columns](#output-files-and-columns)
-7. [Magnitude Scoring System](#magnitude-scoring-system)
-8. [How to Use This Analysis](#how-to-use-this-analysis)
-9. [Technical Implementation Details](#technical-implementation-details)
-10. [Troubleshooting and Optimization](#troubleshooting-and-optimization)
+6. [Keyword Analysis System](#keyword-analysis-system)
+7. [Output Files and Columns](#output-files-and-columns)
+8. [Magnitude Scoring System](#magnitude-scoring-system)
+9. [How to Use This Analysis](#how-to-use-this-analysis)
+10. [Technical Implementation Details](#technical-implementation-details)
+11. [Troubleshooting and Optimization](#troubleshooting-and-optimization)
 
 ---
 
@@ -289,6 +290,170 @@ The collection process is designed for resilience:
 **Length Filtering**: Skips very short text changes that are likely formatting artifacts
 **Context Preservation**: Maintains surrounding text to distinguish meaningful changes from noise
 **Category Weighting**: Emphasizes changes in high-impact keyword categories
+
+---
+
+## Keyword Analysis System
+
+### Overview
+
+The keyword analysis system is a core component that tracks semantic changes in messaging across 15 specialized categories. This system enables researchers to quantify how companies shift their communication strategies over time by monitoring the frequency of domain-specific terminology.
+
+### Keyword Categories and Rationale
+
+#### **1. De-extinction Core Concepts** (`de_extinction`)
+**Purpose**: Track central terminology around species revival
+**Key Terms**: de-extinction, extinct, revive, resurrection, bring back, restore, species recovery, lost species
+**Analysis Value**: Measures how prominently the core mission is presented
+
+#### **2. Functional De-extinction** (`functional_de_extinction`)
+**Purpose**: Monitor discussion of proxy species vs. true resurrection
+**Key Terms**: functional de-extinction, proxy, surrogate, ecological replacement, ecosystem function, keystone species
+**Analysis Value**: Tracks shift between purist vs. pragmatic approaches
+
+#### **3. Climate & Environmental Benefits** (`climate_benefit`)
+**Purpose**: Quantify environmental justification rhetoric
+**Key Terms**: climate change, carbon sequestration, permafrost, ecosystem services, rewilding, biodiversity
+**Analysis Value**: Shows emphasis on environmental vs. scientific motivations
+
+#### **4. Conservation Alignment** (`conservation_alignment`)
+**Purpose**: Track positioning within established conservation frameworks
+**Key Terms**: IUCN, conservation status, endangered, threatened, WWF, red list, habitat protection
+**Analysis Value**: Measures integration with mainstream conservation messaging
+
+#### **5. Ethics & Animal Welfare** (`ethics_welfare`)
+**Purpose**: Monitor attention to ethical considerations
+**Key Terms**: welfare, ethics, bioethics, suffering, moral implications, responsibility, animal rights
+**Analysis Value**: Tracks responsiveness to ethical criticism
+
+#### **6. Indigenous & Cultural Considerations** (`indigenous_cultural`)
+**Purpose**: Track cultural sensitivity and community engagement
+**Key Terms**: indigenous, traditional knowledge, cultural heritage, sacred, community consent, spiritual significance
+**Analysis Value**: Measures cultural awareness evolution
+
+#### **7. Risk & Caution** (`risk_caution`)
+**Purpose**: Monitor acknowledgment of potential dangers
+**Key Terms**: risk, safety, precaution, unintended consequences, biosafety, containment, monitoring
+**Analysis Value**: Shows balance between optimism and responsibility
+
+#### **8. Hype & Breakthrough Claims** (`hype_breakthrough`)
+**Purpose**: Track promotional and sensational language
+**Key Terms**: moonshot, revolutionary, groundbreaking, game-changing, unprecedented, breakthrough
+**Analysis Value**: Quantifies promotional intensity over time
+
+#### **9. Technology & Methods** (`technology_methods`)
+**Purpose**: Monitor technical approach communication
+**Key Terms**: CRISPR, gene editing, ancient DNA, genomics, synthetic biology, cloning, stem cells
+**Analysis Value**: Tracks technical sophistication and approach evolution
+
+#### **10. Business & Funding** (`business_funding`)
+**Purpose**: Track commercial and investment messaging
+**Key Terms**: funding, investment, venture capital, valuation, revenue, commercialization, partnership
+**Analysis Value**: Shows business maturity and market positioning
+
+#### **11. Timeline Claims** (`timeline_claims`)
+**Purpose**: Monitor temporal promises and expectations
+**Key Terms**: years, timeline, soon, 2025-2035, phase, milestone, target, expect, plan
+**Analysis Value**: Tracks ambition vs. realism in project timelines
+
+#### **12. Regulatory & Legal** (`regulatory_legal`)
+**Purpose**: Track engagement with regulatory frameworks
+**Key Terms**: regulation, FDA, USDA, approval, compliance, oversight, legal framework
+**Analysis Value**: Shows regulatory awareness and preparation
+
+#### **13. Target Species** (`target_species`)
+**Purpose**: Monitor species-specific messaging emphasis
+**Key Terms**: mammoth, thylacine, dodo, passenger pigeon, dire wolf, northern white rhino
+**Analysis Value**: Tracks project prioritization and marketing focus
+
+#### **14. Scientific Validation** (`scientific_validation`)
+**Purpose**: Track emphasis on research credibility
+**Key Terms**: peer review, publication, study, evidence, Nature, Science, reproducible, methodology
+**Analysis Value**: Measures scientific legitimacy positioning
+
+#### **15. Opposition & Criticism** (`opposition_criticism`)
+**Purpose**: Monitor acknowledgment of skepticism
+**Key Terms**: criticism, opposition, controversy, skepticism, unrealistic, playing god, waste
+**Analysis Value**: Shows awareness and response to criticism
+
+### Keyword Selection Methodology
+
+#### **Comprehensiveness Criteria**:
+- **Domain Coverage**: Terms span entire de-extinction discourse ecosystem
+- **Stakeholder Perspectives**: Includes scientific, ethical, business, and cultural viewpoints
+- **Temporal Relevance**: Covers both current terminology and emerging concepts
+- **Sentiment Spectrum**: Includes positive, negative, and neutral framings
+
+#### **Accuracy Optimization**:
+- **Synonym Inclusion**: Multiple variations of key concepts (e.g., "de-extinction", "de extinction", "deextinction")
+- **Technical Precision**: Scientific terminology alongside colloquial terms
+- **Cultural Sensitivity**: Proper diacritical marks (māori, Māori) and regional variations
+- **Temporal Specificity**: Exact years (2025-2035) for timeline analysis
+
+#### **Reliability Features**:
+- **Word Boundary Matching**: Uses regex `\b` anchors to avoid false positives
+- **Case Insensitive**: Captures variations in capitalization
+- **Multi-word Phrases**: Handles complex terms like "functional de-extinction"
+- **Context Independence**: Terms selected to be meaningful regardless of surrounding text
+
+### Implementation Details
+
+#### **Counting Algorithm**:
+```python
+def _keyword_counts(self, text: str) -> Dict[str, int]:
+    text_l = text.lower()
+    counts = {}
+    for bucket, words in self.keywords.items():
+        c = 0
+        for w in words:
+            c += len(re.findall(r"\b" + re.escape(w.lower()) + r"\b", text_l))
+        counts[bucket] = c
+    return counts
+```
+
+#### **Change Detection**:
+- **Delta Calculation**: Compares keyword frequencies between consecutive snapshots
+- **Trend Analysis**: Tracks frequency changes over time across categories
+- **Magnitude Weighting**: Keyword changes contribute 15% to overall change magnitude score
+
+### Analytical Applications
+
+#### **Messaging Evolution Tracking**:
+- Monitor shift from technical focus to environmental benefits
+- Track response to regulatory pressure through increased compliance terminology
+- Observe adaptation to criticism via ethics and risk acknowledgment
+
+#### **Strategic Positioning Analysis**:
+- Compare emphasis across different website sections
+- Identify seasonal or event-driven messaging campaigns
+- Detect correlation between external events and terminology shifts
+
+#### **Stakeholder Communication Patterns**:
+- Business terminology for investor-focused content
+- Scientific validation language for academic credibility
+- Cultural sensitivity terms for community engagement
+
+#### **Competitive Intelligence**:
+- Benchmark terminology evolution against industry standards
+- Identify unique positioning strategies through keyword emphasis
+- Track adoption of emerging field terminology
+
+### Quality Assurance & Validation
+
+#### **False Positive Mitigation**:
+- Manual review of high-frequency terms for relevance
+- Context validation for ambiguous terms
+- Regular updates based on field terminology evolution
+
+#### **Coverage Validation**:
+- Cross-reference with academic literature terminology
+- Include stakeholder-specific language from industry reports
+- Monitor emerging terminology through scientific publications
+
+#### **Bias Reduction**:
+- Include both positive and negative framing terms
+- Balance scientific, business, and ethical perspectives
+- Avoid over-weighting any single stakeholder viewpoint
 
 ---
 
