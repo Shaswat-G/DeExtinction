@@ -161,7 +161,7 @@ KEYWORDS = {
 }
 
 # Change detection threshold (cosine distance on token shingles)
-SIGNIFICANT_CHANGE = 0.5  # 0 = identical, 1 = completely different (lowered from 0.20)
+SIGNIFICANT_CHANGE = 0.05  # 0 = identical, 1 = completely different (lowered from 0.20)
 
 # Tagline extraction patterns
 TAGLINE_SELECTORS = [
@@ -519,6 +519,90 @@ class DiffAnalyzer:
             counts[bucket] = c
         return counts
 
+    def _calculate_change_magnitude(
+        self,
+        A_clean: str,
+        B_clean: str,
+        diff_lines: List[str],
+        kw_delta: Dict[str, int],
+    ) -> Dict[str, float]:
+        """
+        Calculate multiple metrics for change magnitude to enable time-series analysis.
+        Returns normalized scores (0-1) for different types of changes.
+        """
+        # 1. Text similarity score (inverse of cosine distance)
+        similarity_score = 1.0 - cosine_distance(A_clean, B_clean)
+
+        # 2. Character change ratio (normalized by average length)
+        len_a, len_b = len(A_clean), len(B_clean)
+        avg_len = (len_a + len_b) / 2 if (len_a + len_b) > 0 else 1
+        char_change_ratio = abs(len_b - len_a) / avg_len
+        char_change_ratio = min(char_change_ratio, 1.0)  # Cap at 1.0
+
+        # 3. Diff line density (changes per total lines)
+        total_lines = len(A_clean.splitlines()) + len(B_clean.splitlines())
+        diff_change_lines = sum(1 for line in diff_lines if line.startswith(("+", "-")))
+        diff_density = diff_change_lines / max(total_lines, 1)
+        diff_density = min(diff_density, 1.0)  # Cap at 1.0
+
+        # 4. Keyword change intensity (sum of absolute keyword deltas)
+        total_kw_changes = sum(abs(v) for v in kw_delta.values())
+        total_kw_baseline = (
+            sum(abs(v) for v in kw_delta.values()) + 10
+        )  # Add baseline to avoid div by 0
+        kw_change_intensity = total_kw_changes / total_kw_baseline
+        kw_change_intensity = min(kw_change_intensity, 1.0)  # Cap at 1.0
+
+        # 5. Structural change score (based on diff types)
+        additions = sum(
+            1
+            for line in diff_lines
+            if line.startswith("+") and not line.startswith("+++")
+        )
+        deletions = sum(
+            1
+            for line in diff_lines
+            if line.startswith("-") and not line.startswith("---")
+        )
+        structural_changes = additions + deletions
+        max_possible_changes = max(
+            len(A_clean.splitlines()), len(B_clean.splitlines()), 1
+        )
+        structural_score = structural_changes / max_possible_changes
+        structural_score = min(structural_score, 1.0)  # Cap at 1.0
+
+        # 6. Combined magnitude score (weighted average)
+        combined_magnitude = (
+            similarity_score * 0.3  # 30% - overall text similarity
+            + char_change_ratio * 0.2  # 20% - character changes
+            + diff_density * 0.25  # 25% - diff line density
+            + kw_change_intensity * 0.15  # 15% - keyword changes
+            + structural_score * 0.1  # 10% - structural changes
+        )
+
+        return {
+            "similarity_score": round(similarity_score, 4),
+            "char_change_ratio": round(char_change_ratio, 4),
+            "diff_density": round(diff_density, 4),
+            "keyword_intensity": round(kw_change_intensity, 4),
+            "structural_score": round(structural_score, 4),
+            "magnitude_score": round(combined_magnitude, 4),
+            "change_category": self._categorize_change_magnitude(combined_magnitude),
+        }
+
+    def _categorize_change_magnitude(self, magnitude: float) -> str:
+        """Categorize change magnitude into human-readable labels."""
+        if magnitude >= 0.8:
+            return "Major"
+        elif magnitude >= 0.6:
+            return "Substantial"
+        elif magnitude >= 0.4:
+            return "Moderate"
+        elif magnitude >= 0.2:
+            return "Minor"
+        else:
+            return "Minimal"
+
     def _pairwise(self, group: pd.DataFrame) -> List[Dict[str, Any]]:
         """
         For each path, compare consecutive snapshots chronologically:
@@ -577,6 +661,11 @@ class DiffAnalyzer:
             # Keep a reasonable snippet (avoid massive reports)
             snippet = "\n".join(meaningful_diff_lines[:300])
 
+            # Calculate change magnitude metrics
+            magnitude_metrics = self._calculate_change_magnitude(
+                A_clean, B_clean, diff_lines, kw_delta
+            )
+
             # Compare taglines if available
             tagline_comparison = {}
             if "taglines" in a and "taglines" in b:
@@ -609,6 +698,7 @@ class DiffAnalyzer:
                 "char_change": len(B_clean) - len(A_clean),
                 **{f"delta_{k}": v for k, v in kw_delta.items()},
                 "diff_snippet": snippet,
+                **magnitude_metrics,  # Add all magnitude metrics
             }
 
             result.update(tagline_comparison)
@@ -657,6 +747,62 @@ class DiffAnalyzer:
         trend_fp = REPORT_DIR / "keyword_trends.csv"
         trend_df.to_csv(trend_fp, index=False, encoding="utf-8")
 
+        # Generate magnitude time-series CSV for plotting
+        if not changes_df.empty and "magnitude_score" in changes_df.columns:
+            # Create a time-series friendly format
+            magnitude_df = changes_df.copy()
+            magnitude_df["date"] = pd.to_datetime(
+                magnitude_df["from_ts"], format="%Y%m%d%H%M%S"
+            )
+            magnitude_df["year_month"] = magnitude_df["date"].dt.to_period("M")
+
+            # Add rolling averages for smoother trends (simplified)
+            magnitude_df = magnitude_df.sort_values("date").reset_index(drop=True)
+            magnitude_df["magnitude_rolling_3"] = (
+                magnitude_df["magnitude_score"].rolling(window=3, min_periods=1).mean()
+            )
+
+            # Monthly aggregation for trend analysis
+            monthly_agg = (
+                magnitude_df.groupby(["year_month", "slug"])
+                .agg(
+                    {
+                        "magnitude_score": ["mean", "max", "count"],
+                        "cosine_distance": "mean",
+                        "char_change": "mean",
+                    }
+                )
+                .round(4)
+            )
+
+            monthly_agg.columns = ["_".join(col).strip() for col in monthly_agg.columns]
+            monthly_agg = monthly_agg.reset_index()
+
+            magnitude_ts_fp = REPORT_DIR / "magnitude_timeseries.csv"
+            magnitude_df[
+                [
+                    "date",
+                    "slug",
+                    "path",
+                    "magnitude_score",
+                    "change_category",
+                    "similarity_score",
+                    "char_change_ratio",
+                    "diff_density",
+                    "keyword_intensity",
+                    "structural_score",
+                    "magnitude_rolling_3",
+                ]
+            ].to_csv(magnitude_ts_fp, index=False, encoding="utf-8")
+
+            monthly_magnitude_fp = REPORT_DIR / "magnitude_monthly.csv"
+            monthly_agg.to_csv(monthly_magnitude_fp, index=False, encoding="utf-8")
+
+            logging.info(f"[Analyze] magnitude time-series: {magnitude_ts_fp}")
+            logging.info(
+                f"[Analyze] monthly magnitude aggregation: {monthly_magnitude_fp}"
+            )
+
         # Markdown summary (compact)
         md = []
         md.append("# Wayback Brand Evolution — Change Log\n")
@@ -664,23 +810,77 @@ class DiffAnalyzer:
         md.append(
             f"\n**Threshold for significant change:** cosine distance ≥ {self.significant_change}\n"
         )
+
+        # Add magnitude analysis summary
+        if not changes_df.empty and "magnitude_score" in changes_df.columns:
+            md.append("\n## Change Magnitude Analysis\n")
+
+            # Overall statistics
+            avg_magnitude = changes_df["magnitude_score"].mean()
+            max_magnitude = changes_df["magnitude_score"].max()
+
+            # Category breakdown
+            if "change_category" in changes_df.columns:
+                category_counts = changes_df["change_category"].value_counts()
+                md.append(f"- **Average magnitude score:** {avg_magnitude:.3f}")
+                md.append(f"- **Maximum magnitude score:** {max_magnitude:.3f}")
+                md.append("- **Change categories:**")
+                for category, count in category_counts.items():
+                    percentage = (count / len(changes_df)) * 100
+                    md.append(f"  - {category}: {count} changes ({percentage:.1f}%)")
+
+            # Top magnitude changes
+            top_changes = changes_df.nlargest(5, "magnitude_score")
+            md.append("\n### Top 5 Highest Magnitude Changes")
+            for _, change in top_changes.iterrows():
+                md.append(
+                    f"- **{change['slug']}** ({change['from_ts']} → {change['to_ts']}): "
+                    f"Magnitude {change['magnitude_score']:.3f} ({change.get('change_category', 'Unknown')})"
+                )
+
+        md.append("\n## Detailed Change Log\n")
+
         for _, r in changes_df.sort_values(["slug", "from_ts"]).iterrows():
+            # Enhanced header with magnitude info
+            magnitude_info = ""
+            if "magnitude_score" in r and "change_category" in r:
+                magnitude_info = f" — **{r['change_category']}** (magnitude: {r['magnitude_score']:.3f})"
+
             md.append(
-                f"\n## {r['slug']} — {r['from_ts']} → {r['to_ts']} (distance {r['cosine_distance']})"
+                f"\n## {r['slug']} — {r['from_ts']} → {r['to_ts']} (distance {r['cosine_distance']}){magnitude_info}"
             )
             md.append(f"- From: {r['from_url']}")
             md.append(f"- To:   {r['to_url']}")
+
+            # Add magnitude breakdown if available
+            if all(
+                col in r
+                for col in [
+                    "similarity_score",
+                    "char_change_ratio",
+                    "diff_density",
+                    "keyword_intensity",
+                    "structural_score",
+                ]
+            ):
+                md.append("- **Change Metrics:**")
+                md.append(f"  - Similarity: {r['similarity_score']:.3f}")
+                md.append(f"  - Character change ratio: {r['char_change_ratio']:.3f}")
+                md.append(f"  - Diff density: {r['diff_density']:.3f}")
+                md.append(f"  - Keyword intensity: {r['keyword_intensity']:.3f}")
+                md.append(f"  - Structural changes: {r['structural_score']:.3f}")
+
             deltas = {
                 k.replace("delta_", ""): int(v)
                 for k, v in r.items()
-                if k.startswith("delta_")
+                if isinstance(k, str) and k.startswith("delta_")
             }
             if deltas:
                 top = sorted(deltas.items(), key=lambda kv: abs(kv[1]), reverse=True)[
                     :5
                 ]
                 md.append(
-                    "- Top keyword deltas: "
+                    "- **Top keyword deltas:** "
                     + ", ".join([f"{k}:{v:+d}" for k, v in top])
                 )
             md.append(
@@ -708,44 +908,61 @@ def check_existing_data() -> Tuple[bool, pd.DataFrame]:
     Returns (data_exists, dataframe)
     """
     index_fp = OUTPUT_DIR / "index.csv"
-    
+
     if not index_fp.exists():
         logging.info("No existing index.csv found - will collect fresh data")
         return False, pd.DataFrame()
-    
+
     try:
         df = pd.read_csv(index_fp, encoding="utf-8")
         if df.empty:
             logging.info("Index.csv exists but is empty - will collect fresh data")
             return False, pd.DataFrame()
-        
+
         # Check if the data files actually exist
         missing_files = []
         for _, row in df.iterrows():
             text_path = row.get("text_path", "")
             html_path = row.get("html_path", "")
-            
+
             if not pathlib.Path(text_path).exists():
                 missing_files.append(text_path)
             if not pathlib.Path(html_path).exists():
                 missing_files.append(html_path)
-        
+
         if missing_files:
-            logging.warning(f"Found {len(missing_files)} missing data files - will recollect")
+            logging.warning(
+                f"Found {len(missing_files)} missing data files - will recollect"
+            )
             return False, pd.DataFrame()
-        
+
         # Convert datetime columns if they exist
+        # Ensure proper datetime conversion
         if "dt_utc" not in df.columns:
             df["dt_utc"] = pd.to_datetime(
                 df["timestamp"], format="%Y%m%d%H%M%S", utc=True
             )
             df["dt_local"] = df["dt_utc"].dt.tz_convert(TIMEZONE)
-        
+        else:
+            # Make sure existing dt_local is properly formatted as datetime
+            if not pd.api.types.is_datetime64_any_dtype(df["dt_local"]):
+                df["dt_local"] = pd.to_datetime(df["dt_local"])
+
         # Print summary of existing data
         total_snapshots = len(df)
         paths_covered = df["path"].nunique()
-        date_range = f"{df['dt_local'].min().strftime('%Y-%m-%d')} to {df['dt_local'].max().strftime('%Y-%m-%d')}"
         
+        # Safe date range formatting
+        try:
+            min_date = df['dt_local'].min()
+            max_date = df['dt_local'].max()
+            if pd.isna(min_date) or pd.isna(max_date):
+                date_range = "Unknown date range"
+            else:
+                date_range = f"{min_date.strftime('%Y-%m-%d')} to {max_date.strftime('%Y-%m-%d')}"
+        except (AttributeError, ValueError):
+            date_range = "Invalid date format"
+
         logging.info("=" * 60)
         logging.info("EXISTING DATA FOUND - SKIPPING API CALLS")
         logging.info("=" * 60)
@@ -753,18 +970,18 @@ def check_existing_data() -> Tuple[bool, pd.DataFrame]:
         logging.info(f"Paths covered: {paths_covered}")
         logging.info(f"Date range: {date_range}")
         logging.info(f"Data location: {OUTPUT_DIR}")
-        
+
         # Show breakdown by path
         path_counts = df.groupby("path").size().sort_values(ascending=False)
         logging.info("\nSnapshots per path:")
         for path, count in path_counts.items():
             logging.info(f"  {path}: {count} snapshots")
-        
+
         logging.info("\nProceeding directly to diff analysis...")
         logging.info("=" * 60)
-        
+
         return True, df
-        
+
     except Exception as e:
         logging.error(f"Error reading existing data: {e}")
         logging.info("Will collect fresh data")
@@ -777,21 +994,27 @@ def print_analysis_summary(diffs_df: pd.DataFrame, changes_df: pd.DataFrame):
     logging.info("ANALYSIS COMPLETED")
     logging.info("=" * 60)
     logging.info(f"Total comparisons: {len(diffs_df)}")
-    logging.info(f"Significant changes: {len(changes_df)} (threshold: {SIGNIFICANT_CHANGE})")
-    
+    logging.info(
+        f"Significant changes: {len(changes_df)} (threshold: {SIGNIFICANT_CHANGE})"
+    )
+
     if not changes_df.empty:
         # Show changes by path
         changes_by_path = changes_df.groupby("slug").size().sort_values(ascending=False)
         logging.info("\nSignificant changes by path:")
         for slug, count in changes_by_path.items():
             logging.info(f"  {slug}: {count} changes")
-        
+
         # Show highest distance changes
-        top_changes = changes_df.nlargest(5, "cosine_distance")[["slug", "from_ts", "to_ts", "cosine_distance"]]
+        top_changes = changes_df.nlargest(5, "cosine_distance")[
+            ["slug", "from_ts", "to_ts", "cosine_distance"]
+        ]
         logging.info("\nTop 5 largest changes:")
         for _, row in top_changes.iterrows():
-            logging.info(f"  {row['slug']}: {row['from_ts']} → {row['to_ts']} (distance: {row['cosine_distance']})")
-    
+            logging.info(
+                f"  {row['slug']}: {row['from_ts']} → {row['to_ts']} (distance: {row['cosine_distance']})"
+            )
+
     logging.info(f"\nReports saved to: {REPORT_DIR}")
     logging.info("=" * 60)
 
@@ -805,7 +1028,7 @@ def main():
 
     # Check if we already have data
     data_exists, index_df = check_existing_data()
-    
+
     if not data_exists:
         # Collect fresh data from API
         logging.info("Starting fresh data collection from Wayback Machine...")
@@ -814,11 +1037,11 @@ def main():
         if index_df.empty:
             logging.warning("No snapshots collected. Check network or paths.")
             return
-    
+
     # Run diff analysis on existing or fresh data
     analyzer = DiffAnalyzer(index_df=index_df)
     diffs_df, changes_df = analyzer.run()
-    
+
     # Print summary
     print_analysis_summary(diffs_df, changes_df)
 
