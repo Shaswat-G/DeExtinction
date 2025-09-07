@@ -177,21 +177,71 @@ Raw HTML → Cleaned Text → Similarity Vectors → Change Metrics → Trend An
 ### Utility Functions
 
 **`html_to_text(url: str, html: str) -> str`**
-- **Purpose**: Converts raw HTML to clean, structured text
-- **Process**:
-  1. Parses HTML using BeautifulSoup
-  2. Removes non-content elements (scripts, styles, navigation)
-  3. Extracts page metadata (title, meta descriptions)
-  4. Preserves text hierarchy while removing boilerplate
-  5. Normalizes whitespace and formatting
-- **Output Format**:
+- **Purpose**: Converts raw HTML to comprehensive, semantically-structured text with enhanced content preservation
+- **Enhanced Features**:
+  - **Semantic Content Labeling**: Different content types are labeled (headings, paragraphs, lists, tables, etc.)
+  - **Metadata Extraction**: Comprehensive extraction of titles, meta descriptions, Open Graph data, keywords
+  - **Structured Content Preservation**: Maintains hierarchy and relationships between content elements
+  - **Navigation & Messaging**: Preserves header, navigation, and footer content that may contain strategic messaging
+  - **Accessibility Content**: Extracts image alt text and link information
+  - **Error-Resilient Processing**: Safe extraction methods prevent failures from malformed HTML
+
+- **Detailed Process**:
+  1. **HTML Parsing**: Uses BeautifulSoup with lxml parser for robust handling
+  2. **Selective Content Removal**: Removes scripts, styles, forms while preserving messaging-relevant navigation
+  3. **Metadata Extraction**: 
+     - Page titles and Open Graph titles
+     - Meta descriptions and Open Graph descriptions  
+     - Keywords meta tags
+  4. **Structured Content Extraction**:
+     - Navigation elements (labeled as `[NAV_n]`)
+     - Header content (labeled as `[HEADER_n]`)
+     - Hierarchical headings (labeled as `[H1]`, `[H2]`, etc.)
+     - Main content areas (labeled as `[MAIN_CONTENT]`)
+     - Paragraphs (labeled as `[P_n]`)
+     - Lists with structure (labeled as `[UL_n_START]`, `[UL_n_ITEM_n]`, `[UL_n_END]`)
+     - Tables with headers and rows (labeled as `[TABLE_n_HEADER_n]`, `[TABLE_n_ROW_n]`)
+     - Blockquotes (labeled as `[QUOTE_n]`)
+     - Image alt text (labeled as `[IMG_ALT_n]`)
+     - Important links with URLs (labeled as `[LINK_n]` or `[LINK_TEXT_n]`)
+     - Footer content (labeled as `[FOOTER_n]`)
+  5. **Content Assembly**: Combines metadata and structured content with clear separators
+  6. **Normalization**: Applies whitespace normalization while preserving semantic structure
+
+- **Enhanced Output Format**:
   ```
   [SOURCE] https://colossal.com/page
-  [TITLE] Page Title Here
-  [META] Meta description content
-
-  Main page content with preserved structure...
+  [TITLE] Revolutionary De-Extinction Technology
+  [META_DESC] Bringing back extinct species using advanced genetic engineering
+  [OG_DESC] Colossal Biosciences: De-extinction company reviving woolly mammoths
+  [KEYWORDS] de-extinction, CRISPR, genetic engineering, mammoth
+  [CONTENT_START]
+  
+  [NAV_0] Home About Science Species News Contact
+  [HEADER_0] Colossal Biosciences - De-extinction Leader
+  [H1] Reviving Extinct Species for a Better Planet
+  [MAIN_CONTENT] Our mission is to develop breakthrough genetic technologies...
+  [P_0] We use advanced CRISPR gene editing to restore extinct species...
+  [UL_0_START]
+  [UL_0_ITEM_0] Woolly Mammoth revival project
+  [UL_0_ITEM_1] Thylacine restoration initiative  
+  [UL_0_END]
+  [TABLE_0_START]
+  [TABLE_0_HEADER_0] Species | Status | Timeline
+  [TABLE_0_ROW_0] Woolly Mammoth | In Progress | 2028
+  [TABLE_0_END]
+  [QUOTE_0] "We're not just bringing back species, we're restoring ecosystems"
+  [IMG_ALT_0] Woolly mammoth in arctic tundra landscape
+  [LINK_0] Learn more about our science -> /science/approach
+  [FOOTER_0] Copyright 2025 Colossal Biosciences. All rights reserved.
   ```
+
+- **Analysis Benefits**:
+  - **Granular Change Detection**: Semantic labels enable precise identification of what type of content changed
+  - **Messaging Evolution Tracking**: Can track changes in navigation, headers, and footer messaging separately
+  - **Content Type Analysis**: Different weighting can be applied to different content types (headings vs. body text)
+  - **Accessibility Monitoring**: Alt text and link changes show evolving accessibility and SEO strategies
+  - **Strategic Communication Analysis**: Link text and navigation changes reveal strategic positioning shifts
 
 **`cosine_distance(a: str, b: str) -> float`**
 - **Purpose**: Measures semantic similarity between two text documents
