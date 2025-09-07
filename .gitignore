@@ -211,3 +211,5 @@ wolf.png
 *.parquet
 \reddit_data
 environment.env
+data/
+reports/
