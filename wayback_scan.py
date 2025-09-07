@@ -510,42 +510,251 @@ def _normalize_whitespace(text: str) -> str:
 
 def html_to_text(url: str, html: str) -> str:
     """
-    Extract readable text from archived HTML:
-    - strips scripts/styles/noscript and common boilerplate containers
-    - preserves headings/paragraphs/link text
-    - adds basic provenance header (source URL, title, meta descriptions)
+    Extract comprehensive readable text from archived HTML with enhanced semantic preservation:
+    - Extracts and labels different content types (headings, paragraphs, lists, etc.)
+    - Preserves content hierarchy and structure
+    - Includes metadata, alt text, and link information
+    - Maintains semantic markers for better diff analysis
     """
     soup = BeautifulSoup(html, "lxml")
 
-    # Remove non-content/boilerplate
-    for tag in soup(["script", "style", "noscript", "template", "svg", "canvas"]):
+    # Remove non-content elements but preserve some navigation for messaging analysis
+    for tag in soup(
+        ["script", "style", "noscript", "template", "svg", "canvas", "iframe"]
+    ):
         tag.decompose()
-    for selector in ["nav", "footer", "header", "form", "aside"]:
+
+    # Remove forms and most boilerplate, but keep some header content for messaging
+    for selector in ["form", "aside"]:
         for n in soup.select(selector):
             n.decompose()
 
-    # Collect a tiny header
-    title = (soup.title.string or "").strip() if soup.title else ""
+    # Remove likely boilerplate navigation but keep main navigation that might contain messaging
+    for selector in [".breadcrumb", ".pagination", ".social-links", ".footer-links"]:
+        for n in soup.select(selector):
+            n.decompose()
 
-    # Extract meta descriptions more safely - ignore type checker for BeautifulSoup
-    meta_desc = ""
-    ogd = ""
-    # Note: Ignoring type issues with BeautifulSoup - it works correctly at runtime
+    # Extract comprehensive metadata
+    metadata = []
 
-    body_text = soup.get_text("\n", strip=True)
-    body_text = _normalize_whitespace(body_text)
+    # Page title
+    title = ""
+    if soup.title:
+        title = (soup.title.string or "").strip()
+        if title:
+            metadata.append(f"[TITLE] {title}")
 
-    header = []
-    header.append(f"[SOURCE] {url}")
-    if title:
-        header.append(f"[TITLE] {title}")
+    # Meta descriptions and Open Graph data - using safe extraction
+    def safe_get_content(elem):
+        """Safely extract content attribute from meta elements."""
+        try:
+            if elem and hasattr(elem, "get"):
+                content = elem.get("content")
+                if content and isinstance(content, str):
+                    return content.strip()
+        except (AttributeError, TypeError):
+            pass
+        return ""
+
+    meta_desc_elem = soup.find("meta", attrs={"name": "description"})
+    meta_desc = safe_get_content(meta_desc_elem)
     if meta_desc:
-        header.append(f"[META] {meta_desc}")
-    if ogd and ogd != meta_desc:
-        header.append(f"[OG] {ogd}")
+        metadata.append(f"[META_DESC] {meta_desc}")
 
-    prefix = "\n\n".join(header).strip()
-    return (prefix + ("\n\n" if prefix and body_text else "") + body_text).strip()
+    og_desc_elem = soup.find("meta", attrs={"property": "og:description"})
+    og_desc = safe_get_content(og_desc_elem)
+    if og_desc:
+        metadata.append(f"[OG_DESC] {og_desc}")
+
+    og_title_elem = soup.find("meta", attrs={"property": "og:title"})
+    og_title = safe_get_content(og_title_elem)
+    if og_title and og_title != title:
+        metadata.append(f"[OG_TITLE] {og_title}")
+
+    keywords_elem = soup.find("meta", attrs={"name": "keywords"})
+    keywords = safe_get_content(keywords_elem)
+    if keywords:
+        metadata.append(f"[KEYWORDS] {keywords}")
+
+    # Extract structured content with semantic markers
+    content_parts = []
+
+    # Helper function to safely extract text
+    def safe_get_text(elem, separator=" "):
+        """Safely extract text from elements."""
+        try:
+            return elem.get_text(separator, strip=True) if elem else ""
+        except Exception:
+            return ""
+
+    # Helper function to safely get attribute
+    def safe_get_attr(elem, attr, default=""):
+        """Safely get attribute from elements."""
+        try:
+            if elem and hasattr(elem, "get"):
+                result = elem.get(attr, default)
+                return (
+                    result
+                    if isinstance(result, str)
+                    else str(result) if result else default
+                )
+        except Exception:
+            pass
+        return default
+
+    # Extract navigation content (might contain important messaging)
+    nav_elements = soup.find_all("nav")
+    for i, nav in enumerate(nav_elements):
+        nav_text = safe_get_text(nav)
+        if nav_text and len(nav_text) > 10:  # Skip very short navigation
+            content_parts.append(f"[NAV_{i}] {nav_text}")
+
+    # Extract header content (often contains key messaging)
+    header_elements = soup.find_all("header")
+    for i, header in enumerate(header_elements):
+        header_text = safe_get_text(header)
+        if header_text and len(header_text) > 10:
+            content_parts.append(f"[HEADER_{i}] {header_text}")
+
+    # Extract headings with hierarchy
+    for level in range(1, 7):
+        headings = soup.find_all(f"h{level}")
+        for i, heading in enumerate(headings):
+            text = safe_get_text(heading)
+            if text:
+                suffix = f"_{i}" if i > 0 else ""
+                content_parts.append(f"[H{level}{suffix}] {text}")
+
+    # Extract main content areas
+    main_selectors = ["main", "[role='main']", ".main-content", ".content"]
+    for selector in main_selectors:
+        elements = soup.select(selector)
+        for i, elem in enumerate(elements):
+            text = safe_get_text(elem)
+            if text and len(text) > 50:  # Only substantial content
+                suffix = f"_{i}" if i > 0 else ""
+                content_parts.append(f"[MAIN_CONTENT{suffix}] {text}")
+                break  # Usually only need the first main content area
+
+    # Extract paragraphs
+    paragraphs = soup.find_all("p")
+    for i, p in enumerate(paragraphs):
+        text = safe_get_text(p)
+        if text and len(text) > 20:  # Skip very short paragraphs
+            content_parts.append(f"[P_{i}] {text}")
+
+    # Extract lists with structure preservation
+    lists = soup.find_all(["ul", "ol"])
+    for i, lst in enumerate(lists):
+        try:
+            items = lst.find_all("li")
+            if items:
+                list_type = "OL" if getattr(lst, "name", "") == "ol" else "UL"
+                content_parts.append(f"[{list_type}_{i}_START]")
+                for j, item in enumerate(items):
+                    text = safe_get_text(item)
+                    if text:
+                        content_parts.append(f"[{list_type}_{i}_ITEM_{j}] {text}")
+                content_parts.append(f"[{list_type}_{i}_END]")
+        except Exception:
+            continue
+
+    # Extract table content
+    tables = soup.find_all("table")
+    for i, table in enumerate(tables):
+        try:
+            rows = table.find_all("tr")
+            if rows:
+                content_parts.append(f"[TABLE_{i}_START]")
+                for j, row in enumerate(rows):
+                    try:
+                        cells = row.find_all(["td", "th"])
+                        if cells:
+                            row_text = " | ".join(
+                                [
+                                    safe_get_text(cell)
+                                    for cell in cells
+                                    if safe_get_text(cell)
+                                ]
+                            )
+                            if row_text:
+                                has_th = any(
+                                    getattr(cell, "name", "") == "th" for cell in cells
+                                )
+                                cell_type = "HEADER" if has_th else "ROW"
+                                content_parts.append(
+                                    f"[TABLE_{i}_{cell_type}_{j}] {row_text}"
+                                )
+                    except Exception:
+                        continue
+                content_parts.append(f"[TABLE_{i}_END]")
+        except Exception:
+            continue
+
+    # Extract blockquotes (often important messaging)
+    blockquotes = soup.find_all("blockquote")
+    for i, bq in enumerate(blockquotes):
+        text = safe_get_text(bq)
+        if text:
+            content_parts.append(f"[QUOTE_{i}] {text}")
+
+    # Extract image alt text (important for accessibility messaging)
+    images = soup.find_all("img")
+    for i, img in enumerate(images):
+        alt_text = safe_get_attr(img, "alt")
+        if alt_text and len(alt_text) > 5:
+            content_parts.append(f"[IMG_ALT_{i}] {alt_text}")
+
+    # Extract important link text (might show strategic messaging)
+    important_links = soup.find_all("a")
+    for i, link in enumerate(important_links):
+        text = safe_get_text(link)
+        href = safe_get_attr(link, "href")
+        if text and len(text) > 5 and len(text) < 200:  # Reasonable link text length
+            if href and not href.startswith("#"):  # Skip anchor links
+                content_parts.append(f"[LINK_{i}] {text} -> {href}")
+            else:
+                content_parts.append(f"[LINK_TEXT_{i}] {text}")
+
+    # Extract footer content (often contains important legal/policy messaging)
+    footer_elements = soup.find_all("footer")
+    for i, footer in enumerate(footer_elements):
+        footer_text = safe_get_text(footer)
+        if footer_text and len(footer_text) > 20:
+            content_parts.append(f"[FOOTER_{i}] {footer_text}")
+
+    # Extract any remaining div content that might be important
+    remaining_divs = soup.find_all("div")
+    for i, div in enumerate(remaining_divs):
+        # Only extract divs with substantial direct text content
+        try:
+            div_string = getattr(div, "string", None)
+            if div_string:  # Direct text, not nested
+                text = str(div_string).strip()
+                if text and len(text) > 30:
+                    content_parts.append(f"[DIV_TEXT_{i}] {text}")
+        except Exception:
+            continue
+
+    # Combine all extracted content
+    all_content = []
+
+    # Add source URL
+    all_content.append(f"[SOURCE] {url}")
+
+    # Add metadata
+    all_content.extend(metadata)
+
+    # Add a separator
+    if metadata:
+        all_content.append("[CONTENT_START]")
+
+    # Add structured content
+    all_content.extend(content_parts)
+
+    # Normalize and return
+    combined_text = "\n\n".join(all_content)
+    return _normalize_whitespace(combined_text)
 
 
 def cosine_distance(a: str, b: str) -> float:
